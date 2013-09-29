@@ -1,30 +1,40 @@
 #include "CPUUsage.h"
+#include "CPUUsage_Private.h"
 
-#include <sys/time.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdint.h>
 #include <sys/resource.h>
 #include <assert.h>
+
+#ifdef __MACH__
+#include <mach/clock.h>
+#include <mach/mach.h>
+#endif
 
 static const int NANOSEC_PER_SEC = 1000000000;
 static const int MICROSEC_PER_SEC =   1000000;
 
-CPUUsageContext_t *CPUUsageCreate(unsigned int windowSize, CPUUsageForWho_t who) 
+CPUUsageContext_t *CPUUsageCreate(size_t windowSize, CPUUsageForWho_t who) 
 {
     CPUUsageContext_t *ctxt = malloc(sizeof(CPUUsageContext_t) + windowSize * sizeof(CPUUsageIntervalStats_t));
     assert(ctxt);
     
-    _CPUUsageInitIntervalBuffer(ctxt, context+1, windowSize);
+    _CPUUsageInitIntervalBuffer(ctxt, ctxt+1, windowSize);
 
     switch (who)
     {
-        case CPUUsageForProcess:
-            ctxt->who = RUSAGE_SELF;
-            break;
-        case CPUUsageForThread:
-            ctxt->who = RUSAGE_THREAD;
-            break;
-        default:
-            CPUUsageFree(ctxt);
-            return 0;
+    case CPUUsageForProcess:
+        ctxt->rusageWho = RUSAGE_SELF;
+        break;
+#ifndef __MACH__
+    case CPUUsageForThread:
+        ctxt->rusageWho = RUSAGE_THREAD;
+        break;
+#endif
+    default:
+        CPUUsageFree(ctxt);
+        return 0;
     }
 
     struct timespec curTimeSpec;
@@ -34,7 +44,7 @@ CPUUsageContext_t *CPUUsageCreate(unsigned int windowSize, CPUUsageForWho_t who)
     ret = getrusage(ctxt->rusageWho, &usage);
     assert(!ret);
 
-    ret = clock_gettime(CLOCK_MONOTONIC, &curTimeSpec);
+    ret = _CPUUsageGetTime(&curTimeSpec);
     assert(!ret);
 
     ctxt->lastTime = curTimeSpec;
@@ -44,12 +54,12 @@ CPUUsageContext_t *CPUUsageCreate(unsigned int windowSize, CPUUsageForWho_t who)
     return ctxt; 
 }
 
-void CPUusageFree(CPUUsageContext_t* ctxt)
+void CPUUsageFree(CPUUsageContext_t* ctxt)
 {
     free(ctxt);
 }
 
-void CPUUsageUpdate()
+void CPUUsageUpdate(CPUUsageContext_t *ctxt)
 {
     struct timespec curTimespec; 
     struct rusage usage;
@@ -58,21 +68,21 @@ void CPUUsageUpdate()
     ret = getrusage(ctxt->rusageWho, &usage);
     assert(!ret);
 
-    ret = clock_gettime(CLOCK_MONOTONIC, &curTimeSpec);
+    ret = _CPUUsageGetTime( &curTimespec);
     assert(!ret);
 
     CPUUsageIntervalStats_t *curInt =  _CPUUsageNextInterval(ctxt);
-    _CPUUsageCaclulateInterval(curInt, 
+    _CPUUsageCalculateInterval(curInt, 
         &(ctxt->lastTime),  
-        &curTimeSpec,
+        &curTimespec,
         &(ctxt->lastUTime),
         &(usage.ru_utime), 
         &(ctxt->lastSTime), 
         &(usage.ru_stime));
 
-    ctxt->lastUtime = usage.ru_utime;
+    ctxt->lastUTime = usage.ru_utime;
     ctxt->lastSTime = usage.ru_stime;
-    ctxt->lastTime = curTimeSpec;
+    ctxt->lastTime = curTimespec;
 }
 
 
@@ -87,7 +97,7 @@ void CPUUsagePrintAllIntervals()
 
 
 void _CPUUsageCalculateInterval(CPUUsageIntervalStats_t *interval, 
-    struct timepsec *intervalStart, 
+    struct timespec *intervalStart, 
     struct timespec *intervalEnd,
     struct timeval *uTimeStart, 
     struct timeval *uTimeEnd, 
@@ -98,15 +108,15 @@ void _CPUUsageCalculateInterval(CPUUsageIntervalStats_t *interval,
     struct timeval uTimeDelta;
     struct timeval sTimeDelta;
 
-    timersub(intervalEnd, intervalStart, &intervalDuration);
+    timespecsub(intervalEnd, intervalStart, &intervalDuration);
 
-    timersub(uTimeEnd, uTimerStart, &uTimeDelta);
+    timersub(uTimeEnd, uTimeStart, &uTimeDelta);
 
-    timesub(sTimeEnd, sTimeStart, &sTimeDelta);
+    timersub(sTimeEnd, sTimeStart, &sTimeDelta);
 
     uint64_t intervalDurNanoSec =  _CPUUsageTimespecToNanoSec(&intervalDuration);
     uint64_t uTimeDeltaNanoSec = _CPUUsageTimevalToNanoSec(&uTimeDelta); 
-    uint64_t sTimeDeltaNanoSec = _CPUusageTimevalToNanoSec(&sTimeDelta);
+    uint64_t sTimeDeltaNanoSec = _CPUUsageTimevalToNanoSec(&sTimeDelta);
 
     interval->userPct = uTimeDeltaNanoSec / ((float)intervalDurNanoSec);
     interval->sysPct = sTimeDeltaNanoSec / ((float)intervalDurNanoSec);
@@ -117,12 +127,64 @@ void _CPUUsageCalculateInterval(CPUUsageIntervalStats_t *interval,
 }
 
 
-void _CPUUsageInitIntervalBuffer(CPUUsageContext_t *ctxt, void *bufferStart, unsigned int intervalCount);
+void _CPUUsageInitIntervalBuffer(CPUUsageContext_t *ctxt, void *bufferStart, size_t windowSize)
 {
     ctxt->intervals = bufferStart;
-    ctxt->windowStart = ctxt->intervals;
-    ctxt->windowEnd ctxt->intervals;
-    ctxt->intervalCount = intervalCount;
+    ctxt->intervalCount = 0;
+    ctxt->windowStart = 0;
+    ctxt->windowSize = windowSize;
+}
+
+
+
+size_t CPUUsageGetNumIntervals(CPUUsageContext_t* ctxt)
+{
+    return ctxt->intervalCount;
+}
+
+CPUUsageIntervalStats_t *_CPUUsageNextInterval(CPUUsageContext_t *ctxt)
+{
+    if (ctxt->intervalCount == ctxt->windowSize)
+    {
+        // We are full, will have to overwrite an the
+        // oldest interval
+        ctxt->windowStart = (ctxt->windowStart + 1) % ctxt->windowSize;
+    }
+    else
+    {
+        // Not full yet, Leave the start value alone and increment the count
+        ctxt->intervalCount++;
+    }
+    size_t next = (ctxt->windowStart + ctxt->intervalCount-1) % ctxt->windowSize;
+    printf("Next Interval return index %lu\n", next);
+    return &(ctxt->intervals[next]);
+}
+
+
+CPUUsageIntervalStats_t* CPUUsageGetInterval(CPUUsageContext_t *ctxt, size_t intervalIndex)
+{
+    assert(intervalIndex < ctxt->intervalCount -1);
+
+    size_t index = ctxt->windowStart + intervalIndex % ctxt->windowSize;
+
+    return &(ctxt->intervals[index]);
+}
+
+
+int _CPUUsageGetTime(struct timespec *ts)
+{
+#ifdef __MACH__ // OS X does not have clock_gettime, use clock_get_time
+    clock_serv_t cclock;
+    mach_timespec_t mts;
+    host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &cclock);
+    clock_get_time(cclock, &mts);
+    mach_port_deallocate(mach_task_self(), cclock);
+    ts->tv_sec = mts.tv_sec;
+    ts->tv_nsec = mts.tv_nsec;
+    return 0;
+#else
+    return clock_gettime(CLOCK_REALTIME, ts);
+#endif
 }
 
 
@@ -136,4 +198,5 @@ uint64_t _CPUUsageTimespecToNanoSec(struct timespec *ts)
 {
     return (ts->tv_sec * NANOSEC_PER_SEC + ts->tv_nsec);
 }
+
 

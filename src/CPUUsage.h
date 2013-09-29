@@ -1,8 +1,7 @@
 #ifndef __CPUUSAGE_H_
 #define __CPUUSAGE_H_
 
-#include "CPUUsage.h"
-
+#include <time.h>
 #include <sys/time.h>
 
 typedef enum CPUUsageForWho
@@ -20,7 +19,7 @@ typedef struct CPUUsageIntervalStats_st {
 
     // Time interval start and duration
     struct timespec intervalStart; 
-    long duartionNanoSec;
+    long durationNanoSec;
 } CPUUsageIntervalStats_t;
 
 
@@ -32,19 +31,24 @@ typedef struct CPUUsageContext__st {
     struct timeval lastSTime;
     struct timespec lastTime;
 
-    unsigned int intervalCount;
+    size_t windowSize; 
+    size_t intervalCount;
+    size_t windowStart;
     CPUUsageIntervalStats_t *intervals; 
-    CPUUsageIntervalStats_t *windowStart;
-    CPUUsageIntervalStats_t *windowEnd;
    
     void *userContext;
 
 } CPUUsageContext_t;
 
-CPUUsageContext_t *CPUUsageCreate(unsigned int windowSize); 
-void CPUusageFree(CPUUsageContext_t* ctxt);
+CPUUsageContext_t *CPUUsageCreate(size_t windowSize, CPUUsageForWho_t who); 
+
+void CPUUsageFree(CPUUsageContext_t* ctxt);
 
 void CPUUsageUpdate();
+
+size_t CPUUsageGetNumIntervals(CPUUsageContext_t* ctxt);
+
+CPUUsageIntervalStats_t* CPUUsageGetInterval(CPUUsageContext_t *ctxt, size_t intervalIndex);
 
 void CPUUsagePrintLatestInterval();
 
