@@ -156,7 +156,6 @@ CPUUsageIntervalStats_t *_CPUUsageNextInterval(CPUUsageContext_t *ctxt)
         ctxt->intervalCount++;
     }
     size_t next = (ctxt->windowStart + ctxt->intervalCount-1) % ctxt->windowSize;
-    printf("Next Interval return index %lu\n", next);
     return &(ctxt->intervals[next]);
 }
 
