@@ -1,6 +1,7 @@
 #ifndef __CPUUSAGE_H_
 #define __CPUUSAGE_H_
 
+#include <stdio.h>
 #include <time.h>
 #include <sys/time.h>
 
@@ -50,9 +51,21 @@ size_t CPUUsageGetNumIntervals(CPUUsageContext_t* ctxt);
 
 CPUUsageIntervalStats_t* CPUUsageGetInterval(CPUUsageContext_t *ctxt, size_t intervalIndex);
 
-void CPUUsagePrintLatestInterval();
 
-void CPUUsagePrintAllIntervals();
+void CPUUsagePrintAllIntervals(CPUUsageContext_t *ctxt, FILE *outfile);
+
+#ifdef CPUUSAGE_HAVE_JANSSON
+#include <jansson.h>
+void CPUUsagePrintfAllIntervalsJSON(CPUUsageContext_t *ctxt, FILE *outfile);
+
+void CPUUsagePrintfIntervalJSON(CPUUsageContext_t *ctxt, FILE *outfile, size_t intervalIndex);
+
+void CPUUsagePrintLatestIntervalJSON(CPUUsageContext_t *ctxt, FILE *outfile);
+
+json_t* CPUUsageIntervalToJSON(CPUUsageIntervalStats_t *interval);
+
+json_t* CPUUsageWindowToJSON(CPUUsageContext_t *ctxt);
+#endif //CPUUSAGE_HAVE_JANSON
 
 #endif /* __CPUUSAGE_H_ */
 

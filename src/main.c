@@ -33,6 +33,7 @@ int main()
     sleep(5);
 
     CPUUsageUpdate(ctxt);    
+    CPUUsagePrintfAllIntervalsJSON(ctxt, stdout);
     printf("done");
 }
 

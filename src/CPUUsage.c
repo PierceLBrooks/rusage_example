@@ -2,8 +2,7 @@
 #include "CPUUsage_Private.h"
 
 #include <stdlib.h>
-#include <stdio.h>
-#include <stdint.h>
+#include <inttypes.h>
 #include <sys/resource.h>
 #include <assert.h>
 
@@ -13,7 +12,7 @@
 #endif
 
 static const int NANOSEC_PER_SEC = 1000000000;
-static const int MICROSEC_PER_SEC =   1000000;
+static const int MICROSEC_PER_NANOSEC =  1000;
 
 CPUUsageContext_t *CPUUsageCreate(size_t windowSize, CPUUsageForWho_t who) 
 {
@@ -86,13 +85,13 @@ void CPUUsageUpdate(CPUUsageContext_t *ctxt)
 }
 
 
-void CPUUsagePrintLatestInterval()
+void _CPUUsagePrintInterval(FILE *outfile, CPUUsageIntervalStats_t *interval)
 {
-}
-
-
-void CPUUsagePrintAllIntervals()
-{
+    fprintf(outfile, "Interval Start: %lld s %lld ns\n", (long long)interval->intervalStart.tv_sec, (long long)interval->intervalStart.tv_nsec);
+    fprintf(outfile, "Interval Duration (ns): %ld\n", interval->durationNanoSec);
+    fprintf(outfile, "User Percent: %f\n", interval->userPct);
+    fprintf(outfile, "Sys Percent: %f\n", interval->sysPct);
+    fprintf(outfile, "Sys Percent: %f\n", interval->overallPct);
 }
 
 
@@ -118,9 +117,9 @@ void _CPUUsageCalculateInterval(CPUUsageIntervalStats_t *interval,
     uint64_t uTimeDeltaNanoSec = _CPUUsageTimevalToNanoSec(&uTimeDelta); 
     uint64_t sTimeDeltaNanoSec = _CPUUsageTimevalToNanoSec(&sTimeDelta);
 
-    interval->userPct = uTimeDeltaNanoSec / ((float)intervalDurNanoSec);
-    interval->sysPct = sTimeDeltaNanoSec / ((float)intervalDurNanoSec);
-    interval->overallPct = (uTimeDeltaNanoSec + sTimeDeltaNanoSec) / ((float)intervalDurNanoSec);
+    interval->userPct = uTimeDeltaNanoSec / ((float)intervalDurNanoSec) * 100.0;
+    interval->sysPct = sTimeDeltaNanoSec / ((float)intervalDurNanoSec) * 100.0;
+    interval->overallPct = (uTimeDeltaNanoSec + sTimeDeltaNanoSec) / ((float)intervalDurNanoSec) * 100.0;
    
     interval->intervalStart = *intervalStart;
     interval->durationNanoSec = intervalDurNanoSec;
@@ -142,12 +141,20 @@ size_t CPUUsageGetNumIntervals(CPUUsageContext_t* ctxt)
     return ctxt->intervalCount;
 }
 
+CPUUsageIntervalStats_t* CPUUsageGetInterval(CPUUsageContext_t *ctxt, size_t intervalIndex)
+{
+    assert(intervalIndex < ctxt->intervalCount);
+
+    size_t index = (ctxt->windowStart + intervalIndex) % ctxt->windowSize;
+
+    return &(ctxt->intervals[index]);
+}
+
 CPUUsageIntervalStats_t *_CPUUsageNextInterval(CPUUsageContext_t *ctxt)
 {
     if (ctxt->intervalCount == ctxt->windowSize)
     {
-        // We are full, will have to overwrite an the
-        // oldest interval
+        // We are full, slide the window over
         ctxt->windowStart = (ctxt->windowStart + 1) % ctxt->windowSize;
     }
     else
@@ -155,18 +162,8 @@ CPUUsageIntervalStats_t *_CPUUsageNextInterval(CPUUsageContext_t *ctxt)
         // Not full yet, Leave the start value alone and increment the count
         ctxt->intervalCount++;
     }
-    size_t next = (ctxt->windowStart + ctxt->intervalCount-1) % ctxt->windowSize;
+    size_t next = (ctxt->windowStart + ctxt->intervalCount - 1) % ctxt->windowSize;
     return &(ctxt->intervals[next]);
-}
-
-
-CPUUsageIntervalStats_t* CPUUsageGetInterval(CPUUsageContext_t *ctxt, size_t intervalIndex)
-{
-    assert(intervalIndex < ctxt->intervalCount -1);
-
-    size_t index = ctxt->windowStart + intervalIndex % ctxt->windowSize;
-
-    return &(ctxt->intervals[index]);
 }
 
 
@@ -189,7 +186,7 @@ int _CPUUsageGetTime(struct timespec *ts)
 
 uint64_t _CPUUsageTimevalToNanoSec(struct timeval *tv)
 {
-    return (tv->tv_sec * NANOSEC_PER_SEC + tv->tv_usec * MICROSEC_PER_SEC);
+    return (tv->tv_sec * NANOSEC_PER_SEC + tv->tv_usec * MICROSEC_PER_NANOSEC);
 }
 
 
@@ -197,5 +194,4 @@ uint64_t _CPUUsageTimespecToNanoSec(struct timespec *ts)
 {
     return (ts->tv_sec * NANOSEC_PER_SEC + ts->tv_nsec);
 }
-
 
