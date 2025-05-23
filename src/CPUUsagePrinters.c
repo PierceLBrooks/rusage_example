@@ -1,5 +1,5 @@
 #include "CPUUsage.h"
-#include "CPUusage_Private.h"
+#include "CPUUsage_Private.h"
 
 #include <stdio.h>
 

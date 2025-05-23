@@ -32,8 +32,12 @@ int main()
     
     sleep(5);
 
-    CPUUsageUpdate(ctxt);    
+    CPUUsageUpdate(ctxt);   
+#ifdef CPUUSAGE_HAVE_JANSSON 
     CPUUsagePrintfAllIntervalsJSON(ctxt, stdout);
+#else
+    CPUUsagePrintAllIntervals(ctxt, stdout);
+#endif
     printf("done");
 }
 

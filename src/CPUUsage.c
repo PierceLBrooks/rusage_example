@@ -26,11 +26,11 @@ CPUUsageContext_t *CPUUsageCreate(size_t windowSize, CPUUsageForWho_t who)
     case CPUUsageForProcess:
         ctxt->rusageWho = RUSAGE_SELF;
         break;
-#ifndef __MACH__
+/*#ifndef __MACH__
     case CPUUsageForThread:
         ctxt->rusageWho = RUSAGE_THREAD;
         break;
-#endif
+#endif*/
     default:
         CPUUsageFree(ctxt);
         return 0;
